@@ -1,0 +1,686 @@
+#!/usr/bin/ruby
+
+require 'stringio'
+require 'set'
+
+class Token
+  attr_reader :type, :line, :col  #consulta el valor 
+  
+  def initialize(type,lineNum,colNum) #constructor
+    @type = type  #@type dice que se esta refiriendo a las variables 
+    @line = lineNum
+    @col = colNum
+   end
+end
+
+class LexicalToken < Token  #LexicalToken hereda de Token
+  attr_reader :lex
+   
+  def initialize(type,lex,lineNum,colNum)
+    super(type,lineNum,colNum)
+    
+    @lex = lex
+   end
+end
+
+class Scanner   
+  attr_reader :auxenter2
+  def initialize(inStream,enter)
+    @istream = inStream
+    @keywords = Set.new(["S","R","M","P","C"]) #including new caracters
+    @lineCount = 1                              
+    @colCount = -1
+    @needToken = true
+    @lastToken = nil
+    @auxenter2 = enter
+  end
+  
+  def putBackToken()
+    @needToken = false
+  end
+  
+  def getToken()
+    if !@needToken
+      @needToken = true
+      return @lastToken
+    end
+    #maquina de estado finito
+    state = 0
+    foundOne = false
+    c = @istream.getc()
+    
+    if @istream.eof() then
+      @lastToken = Token.new(:eof,@lineCount,@colCount)
+      return @lastToken
+    end
+    
+    while !foundOne
+      @colCount = @colCount + 1
+      case state
+      when 0
+        lex = ""
+        column = @colCount
+        line = @lineCount
+        if isLetter(c) then state=1
+        elsif isDigit(c) then state=2
+        elsif c == ?+ then state = 3
+        elsif c == ?- then state = 4
+        elsif c == ?* then state = 5
+        elsif c == ?/ then state = 6
+        elsif c == ?( then state = 7
+        elsif c == ?) then state = 8
+        elsif c == ?% then state = 9
+        elsif c == ?\n then 
+          @colCount = -1
+          @lineCount = @lineCount+1
+        elsif isWhiteSpace(c) then state = state #ignore whitespace
+        elsif @istream.eof() then
+          @foundOne = true
+          type = :eof
+        else 
+          if !@auxenter2 then 
+          print "Unrecognized Token found at line ",line," and column ",column,"\n" 
+          end
+          raise "Unrecognized Token"
+        end
+      when 1
+        if isLetter(c) or isDigit(c) then state = 1
+        else
+          if @keywords.include?(lex) then
+            foundOne = true
+            type = :keyword
+          else
+            foundOne = true
+            type = :identifier
+          end
+        end
+      when 2
+        if isDigit(c) then state = 2
+        else
+          type = :number
+          foundOne = true
+        end
+      when 3
+        type = :add
+        foundOne = true
+      when 4
+        type = :sub
+        foundOne = true
+      when 5
+        type = :times
+        foundOne = true
+      when 6
+        type = :divide
+        foundOne = true
+      when 7
+        type = :lparen
+        foundOne = true
+      when 8
+        type = :rparen
+        foundOne = true
+      when 9
+        type = :mod
+        foundOne = true
+      end
+      #cases
+      if !foundOne then
+        lex.concat(c)
+        c = @istream.getc()
+      end
+      
+    end
+    
+    @istream.ungetc(c)   
+    @colCount = @colCount - 1
+    if type == :number or type == :identifier or type == :keyword then
+      t = LexicalToken.new(type,lex,line,column)
+    else
+      t = Token.new(type,line,column)
+    end
+    
+    @lastToken = t
+    return t 
+  end
+  
+  private
+  def isLetter(c) 
+    return ((?a <= c and c <= ?z) or (?A <= c and c <= ?Z))
+  end
+  
+  def isDigit(c)
+    return (?0 <= c and c <= ?9)
+  end
+  
+  def isWhiteSpace(c)
+    return (c == ?\  or c == ?\n or c == ?\t)
+  end
+end
+
+class BinaryNode
+  attr_reader :left, :right
+  
+  def initialize(left,right)
+    @left = left
+    @right = right
+  end
+end
+
+class UnaryNode
+  attr_reader :subTree
+  
+  def initialize(subTree)
+    @subTree = subTree
+  end
+end
+
+#clases
+class StoreNode < UnaryNode
+  def iniciatalize(subTree)
+    super(subTree)
+  end
+  
+  def evaluate()
+    $calc.memory = @subTree.evaluate()
+    return $calc.memory
+  end
+  
+  def ewe()
+    compewe = "\n #Store"
+    compewe += "\n memory := M[sp+0]"
+    return @subTree.ewe() + compewe
+  end
+end
+
+class AddNode < BinaryNode
+  def initialize(left, right)
+    super(left,right)
+  end
+  
+  def evaluate() 
+    return @left.evaluate() + @right.evaluate()
+  end
+  
+  def ewe()
+    compewe = "\n#Add"
+    compewe += "\n operator2 := M[sp+0]"
+    compewe += "\n operator1 := M[sp+1]"
+    compewe += "\n operator1 := operator1 + operator2"
+    compewe += "\n sp := sp + one"
+    compewe += "\n M[sp+0] := operator1"
+    return @left.ewe() + @right.ewe() + compewe
+  end
+end
+
+class SubNode < BinaryNode
+  def initialize(left, right)
+    super(left,right)
+  end
+ 
+  def evaluate() 
+    return @left.evaluate() - @right.evaluate()
+  end
+  
+  def ewe()
+    compewe = "\n#Sub"
+    compewe += "\n operator2 := M[sp+0]"
+    compewe += "\n operator1 := M[sp+1]"
+    compewe += "\n operator1 := operator1 - operator2"
+    compewe += "\n sp := sp + one"
+    compewe += "\n M[sp+0] := operator1"
+    return @left.ewe() + @right.ewe() + compewe
+  end
+end
+
+class TimesNode < BinaryNode
+  def initialize(left, right)
+    super(left,right)
+  end
+  
+  def evaluate() 
+    return @left.evaluate() * @right.evaluate()
+  end
+  
+  def ewe()
+    compewe = "\n#Times"
+    compewe += "\n operator2 := M[sp+0]"
+    compewe += "\n operator1 := M[sp+1]"
+    compewe += "\n operator1 := operator1 * operator2"
+    compewe += "\n sp := sp + one"
+    compewe += "\n M[sp+0] := operator1"
+    return @left.ewe() + @right.ewe() + compewe
+  end
+end
+
+class DivideNode < BinaryNode
+  def initialize(left, right)
+    super(left,right)
+  end
+  
+  def evaluate() 
+    return @left.evaluate() / @right.evaluate()
+  end
+  
+  def ewe()
+    compewe = "\n#Divide"
+    compewe += "\n operator2 := M[sp+0]"
+    compewe += "\n operator1 := M[sp+1]"
+    compewe += "\n operator1 := operator1 / operator2"
+    compewe += "\n sp := sp + one"
+    compewe += "\n M[sp+0] := operator1"
+    return @left.ewe() + @right.ewe() + compewe
+  end
+end
+
+class ModNode < BinaryNode
+  def inicialize(left, right)
+    super(left, right)
+  end
+  
+  def evaluate()
+    return @left.evaluate() % @right.evaluate()
+  end
+  
+  def ewe()
+    compewe = "\n#Module"
+    compewe += "\n operator2 := M[sp+0]"
+    compewe += "\n operator1 := M[sp+1]"
+    compewe += "\n operator1 := operator1 % operator2"
+    compewe += "\n sp := sp + one"
+    compewe += "\n M[sp+0] := operator1"
+    return @left.ewe() + @right.ewe() + compewe
+  end
+end
+
+class IdNode 
+  def initialize(id)
+    @id = id
+  end  
+  def evaluate()    
+    return $calc.var[@id].to_i
+  end
+  def ewe()
+    compewe = ""
+    compewe += "# push("+ @id +")\n"
+    compewe += "sp := sp - one \n"
+    compewe += "operator1 :="+ @id +"\n"
+    compewe += "M[sp+0] := operator1\n"
+    return compewe
+  end
+end  
+
+class NumNode 
+  def initialize(num)
+    @num = num
+  end
+  
+  def evaluate() 
+      return @num
+  end
+  
+  def ewe()
+    a = @num  #to string para permitir la generacion de archivo
+    compewe = "\n #push(" + a.to_s() + ")"
+    compewe += "\n sp := sp - one "
+    compewe += "\n operator1 := " + a.to_s()
+    compewe += "\n M[sp+0] := operator1"
+    return compewe
+  end
+end
+
+class RecallNode
+  def evaluate()
+    return $calc.memory
+  end
+
+  def ewe()
+    compewe = "\n #Recall"
+    compewe += "\n sp := sp - one"
+    compewe += "\n M[sp+0] := memory\n"
+    return compewe
+  end
+end   
+
+class MinusNode < UnaryNode
+  def initialize(subTree)
+    super(subTree)    
+  end
+  def evaluate()
+    return $calc.memory = $calc.memory-subTree.evaluate()
+  end
+  def ewe()
+    compewe = "\n#Memory Minus" 
+    compewe += "\n operator1 := M[sp+0]"
+    compewe += "\n memory := memory - operator1"
+    compewe += "\n M[sp+0] := memory"
+    return @subTree.ewe() + compewe
+  end
+end
+
+class PlusNode < UnaryNode
+  def initialize(subTree)
+    super(subTree)    
+  end
+  def evaluate()
+    return $calc.memory = $calc.memory+subTree.evaluate()
+   end
+  def ewe()
+    compewe = "\n#Memory Plus" 
+    compewe += "\n operator1 := M[sp+0]"
+    compewe += "\n memory := memory + operator1"
+    compewe += "\n M[sp+0] := memory"
+    return @subTree.ewe() + compewe
+  end
+end
+
+class ClearNode
+  def evaluate()
+    return $calc.memory = 0
+  end
+  def ewe()
+    compewe = "\n #Clear" 
+    compewe += "\n memory := zero" 
+    compewe += "\n sp := sp - one" 
+    compewe += "\n M[sp+0] := memory" 
+    return compewe
+  end
+end
+
+class Parser
+  
+ attr_reader :auxenter
+ def initialize(istream,enter)
+    @scan = Scanner.new(istream,enter)
+    @auxenter = enter
+  end
+  
+  def parse()
+    return Prog()
+  end
+  
+  private
+  def Prog()
+    result = Expr()
+    t = @scan.getToken()
+    if t.type != :eof then
+      if @auxenter 
+        print "Expected EOF. Found ", t.type, ".\n"
+      end
+      raise "Parse Error"
+    end    
+    return result
+  end
+  
+  def Expr() 
+    return RestExpr(Term())
+  end
+  
+  def RestExpr(e) 
+    t = @scan.getToken()
+    
+    if t.type == :add then
+      return RestExpr(AddNode.new(e,Term()))
+    end
+    
+    if t.type == :sub then
+      return RestExpr(SubNode.new(e,Term()))
+    end
+    
+    @scan.putBackToken()
+    
+    return e
+  end
+  
+  def Term()
+    return RestTerm(Storable())
+  end
+  
+  def RestTerm(e)
+    t = @scan.getToken()
+    
+    if t.type == :times then
+      return RestTerm(TimesNode.new(e,Storable()))
+    end
+    
+    if t.type == :divide then
+      return RestTerm(DivideNode.new(e,Storable()))
+    end
+    
+    if t.type == :mod then
+      return RestTerm(ModNode.new(e,Storable()))
+    end
+    @scan.putBackToken()
+    return e
+  end
+   
+  #new adds
+  def Storable()
+    return MemOperation(Factor())
+  end
+  
+  def MemOperation(fact)
+    t = @scan.getToken()
+    if t.type == :keyword then
+      if t.lex == "M"
+        return MinusNode.new(fact)
+      end
+      if t.lex == "P"
+        return PlusNode.new(fact)
+      end      
+      if t.lex == "S" then
+        return StoreNode.new(fact)
+      else
+        if !@auxenter then
+          print "Syntax Error: Expected S, found ", t.type, ".\n" 
+        end
+        raise "Parse Error" 
+      end
+    else @scan.putBackToken()
+      #modifie e = fact; 
+    end
+    return fact
+  end
+  
+  def Factor()
+    t = @scan.getToken()
+    if t.type == :identifier then
+      return IdNode.new(t.lex())
+    end
+    if t.type == :number then
+      return NumNode.new(t.lex.to_i()) 
+    elsif t.type == :keyword then
+      if t.lex == "R" then 
+        return RecallNode.new()
+      end
+      if t.lex == "C"
+        return ClearNode.new()
+      else
+        if !@auxenter then 
+          print "Syntax Error: Expected R, found ", t.type, ".\n"
+        end
+        raise "Parse Error"
+      end
+    elsif t.type == :lparen then
+      e = Expr() 
+      t = @scan.getToken()
+      if t.type != :rparen then 
+          if !@auxenter then
+            print "Expected ) found token ", t.type, ".\n"
+          end
+        raise "Parse Error" 
+      end 
+      return e 
+    end
+    if !@auxenter then
+      print "Expected number. R or (, found ", t.type, ".\n"
+    end
+    raise "Parse Error" 
+  end 
+end 
+
+class Calculator
+
+  attr_writer :memory
+  attr_reader :memory
+  attr_accessor :var
+  
+  def initialize()
+    @memory = 0
+    @var = Hash.new
+  end
+  
+  #eval expr  
+  def eval(expr,enter)
+    parser = Parser.new(StringIO.new(expr),enter)
+    ast = parser.parse()
+    return ast.evaluate()
+  end
+  
+  #implement ewe
+  def ewe(expr,enter)
+    parser = Parser.new(StringIO.new(expr),enter)
+    ast = parser.parse()
+    return ast.ewe()
+  end
+end
+
+#start
+
+#ejecucion normal
+
+if ARGV.size == 0 then
+  print "> "
+  until ARGF.eof?
+    begin
+      text = gets
+      $calc = Calculator.new()   
+      puts "= " + $calc.eval(text,true).to_s
+    rescue 
+      puts "* parser error"
+    end
+    print "> "
+  end
+
+#ewe itertativo
+  
+elsif ARGV.size == 1
+  aux = ARGV.shift
+  if aux == "-c" then 
+    print ">"
+    fname = "a.ewe"
+    $archivo = File.open(fname,'w')
+    until ARGF.eof?
+      print ">"
+      begin
+        text = gets
+        $calc = Calculator.new()
+        res = $calc.ewe(text,false).to_s
+        ini = "\n #Expresion:" + text 
+        ini += "\n# Instrucciones antes del recorrido del arbol abstracto sintactico"
+        ini += "\n sp := 1000\n one := 1\n zero := 0\n memory := zero"
+        $archivo.puts ini
+        $calc.var.each{|key, value|$archivo.puts "  #{key}   := #{value}"}
+        fin = "\n #  Write result"
+        fin +=  "\n operator1 := M[sp+0]"
+        fin +=  "\n sp := sp - one"
+        fin +=  "\n writeInt(operator1)"
+        $codigoewe =  res + fin
+        #archivo.puts $codigoewe
+      rescue
+      end
+      $archivo.puts $codigoewe
+    end
+    finf =  "\n end: halt"
+    finf +=  "\n equ memory    M[0]" 
+    finf +=  "\n equ one       M[1]"   #end of ewe file      
+    finf +=  "\n equ zero      M[2]"
+    finf +=  "\n equ operator1 M[3]"
+    finf +=  "\n equ operator2 M[4]"
+    finf +=  "\n equ sp        M[5]"
+    finf +=  "\n equ stack     M[6]\n"
+    #finf off
+    #$calc = Calculator.new()
+    $archivo.puts finf
+    $calc.var.each{|key, value|$archivo.puts"equ  #{key}     M[#{value}]"}
+    $archivo.close
+  end
+  
+  #file ewe apartir de un fichero
+  
+  if aux !="-c" 
+    #puts "entro"
+    begin
+      file = File.open(aux,'r+')
+      #puts "Fichero #{aux}"
+      text = ""
+      File.open(file).each do |line|
+        #text += line
+        $calc = Calculator.new()
+        result = $calc.eval(line,true).to_s
+        puts "= " + result
+      end
+    rescue
+    end
+    #aux = ARGV.shift
+    #do later
+  end
+  
+elsif ARGV.size > 1
+  aux = ARGV.shift
+  if aux == "-v"
+    $calc = Calculator.new()
+    begin
+      while ARGV.size !=0
+        valor = ARGV.shift
+        car = valor[0..0]
+        num = valor[2..valor.length]
+        $calc.var[car] = num
+      end
+      print "> "
+      until ARGF.eof?
+        begin
+          text = gets
+          puts "= " + $calc.eval(text,true).to_s
+        rescue 
+          puts "* parser error"
+        end
+        print "> "
+      end
+    rescue
+    end
+  end
+  
+  if aux == "-c"
+    aux = ARGV.shift
+    fname = "a.ewe"
+    $files = File.open(fname,'w')
+    filea = File.open(aux,'r+')
+    File.open(filea).each do |line|
+      #text += line
+      $calc = Calculator.new()
+      res = $calc.ewe(line,true).to_s
+      ini = "\n #Expresion:" + line 
+      ini += "\n# Instrucciones antes del recorrido del arbol abstracto sintactico"
+      ini += "\n sp := 1000\n one := 1\n zero := 0\n memory := zero"
+      fin = "\n #  Write result"
+      fin +=  "\n operator1 := M[sp+0]"
+      fin +=  "\n sp := sp - one"
+      fin +=  "\n writeInt(operator1)"
+      $ewecode = ini + res + fin
+      #archivo.puts $codigoewe
+      $files.puts $ewecode
+    end
+    finf =  "\n end: halt"
+    finf +=  "\n equ memory    M[0]" 
+    finf +=  "\n equ one       M[1]"   #end of ewe file      
+    finf +=  "\n equ zero      M[2]"
+    finf +=  "\n equ operator1 M[3]"
+    finf +=  "\n equ operator2 M[4]"
+    finf +=  "\n equ sp        M[5]"
+    finf +=  "\n equ stack     M[6]\n"
+    #finf off
+    $files.puts finf
+    $files.close
+    puts "Se ha generado el archivo a.ewe"
+  end
+end
+
